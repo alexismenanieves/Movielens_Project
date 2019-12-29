@@ -1,0 +1,229 @@
+---
+title: "Movielens Project Report"
+author: "Manuel Alexis Mena Nieves"
+date: "October 17, 2019"
+output: pdf_document
+---
+
+## 1. Introduction
+
+This project report is about creating a movie recommendation system for the HarvardX Data Science professional certificate program, using the 10M version of the Movielens Dataset.
+
+This dataset describes 5-star rating and free-text tagging activity from MovieLens, a movie recommendation service, with a ‘movieId’ for each movie, and an anonymized ‘userId’ for each user who provided one or more movie reviews.
+
+The goal of the project is to create an algorithm to predict how users will rate movies using all the tools shown throughout the courses in this series. To accomplish this an exploratory analysis was done, in order to understand the data and summarize their main characteristics with tables and visual methods. After this, a machine learning model was created to predict how each user would rate movies.
+
+## 2. Getting the data
+
+The following code will be used to download the dataset. We begin loading the libraries tidyverse, caret and data.table:
+```{r, message=FALSE, warning=FALSE}
+if(!require(tidyverse)) 
+  install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) 
+  install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) 
+  install.packages("data.table", repos = "http://cran.us.r-project.org")
+```
+
+&nbsp;  
+As the file containing the dataset is large, the script checks its availability in project folder. If not, we proceed to download the file from Grouplens site and make it a dataframe:  
+
+```{r, warning=FALSE}
+if (!file.exists("ml-10M100K/ratings.dat") || !file.exists("ml-10M100K/movies.dat")) {
+  dl <- tempfile()
+  download.file("http://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
+  ratings <- fread(text = gsub("::", "\t", readLines(unzip(dl, "ml-10M100K/ratings.dat"))),
+                   col.names = c("userId", "movieId", "rating", "timestamp"))
+  movies <- str_split_fixed(readLines(unzip(dl, "ml-10M100K/movies.dat")), "\\::", 3)
+  
+} else {
+  ratings <- fread(text = gsub("::", "\t", readLines("ml-10M100K/ratings.dat")),
+                   col.names = c("userId", "movieId", "rating", "timestamp"))
+  movies <- str_split_fixed(readLines("ml-10M100K/movies.dat"), "\\::", 3)  
+}
+
+colnames(movies) <- c("movieId", "title", "genres")
+movies <- as.data.frame(movies) %>% mutate(movieId = as.numeric(levels(movieId))[movieId],
+                                           title = as.character(title),
+                                           genres = as.character(genres))
+
+movielens <- left_join(ratings, movies, by = "movieId")
+```
+
+&nbsp;  
+We proceed to divide the movielens dataframe created into two datasets, one for training and the other one for validation. 
+
+```{r, warning=FALSE, message=FALSE}
+
+set.seed(1, sample.kind="Rounding")
+
+# if using R 3.5 or earlier, use `set.seed(1)` instead
+test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
+edx <- movielens[-test_index,]
+temp <- movielens[test_index,]
+
+# Make sure userId and movieId in validation set are also in edx set
+validation <- temp %>% 
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId")
+
+# Add rows removed from validation set back into edx set
+removed <- anti_join(temp, validation)
+edx <- rbind(edx, removed)
+rm(dl, ratings, movies, test_index, temp, movielens, removed)
+```
+
+&nbsp;  
+The training set name is edx, and it will be used for exploratory analysis and modelling, according to the findings we will make.
+
+## 3. Exploratory Analysis
+
+The first step in the data analysis process is to make sense of the data we have and then figure out what questions we want to ask and how to frame them, as well as how best to manipulate the data to get the answers we need. This process is called exploratory analysis, where we make a broad look at patterns, trends, outliers and unexpected results in the existing data. 
+Firstly, we want to know the dimension of the edx dataset:
+
+```{r}
+dim(edx)
+```
+
+&nbsp;  
+There are 9,000,055 observations of 6 variables. Let's look the name of each variable:
+
+```{r}
+as_tibble(edx)
+```
+
+&nbsp;  
+We can see that we have the variables userId, movieId, rating, timestamp, title and genres. Let's make a summary to understand the rating data:
+
+```{r}
+summary(edx)
+```
+
+&nbsp;  
+The mean rating is 3.512, and the median rating is 4. We can see that the lowest rating is 0.5 and the highest is 5. The interquartile range is 1.
+
+We have a timestamp variable which is not easy to understand, and the title variable has the year in parenthesis, so we must convert the timestamp to a common date value, and extract the year from the title using regex:
+
+```{r, warning=FALSE}
+# Extract the date from edx and validation sets
+edx <- edx %>% 
+  mutate(date = as.Date.POSIXct(timestamp)) %>% select(-timestamp)
+validation <- validation %>% 
+  mutate(date = as.Date.POSIXct(timestamp)) %>% select(-timestamp)
+
+# Use regex to extract the year from the movie title
+edx <- edx %>% 
+  mutate(year = as.integer(str_extract(str_extract(title,"\\((\\d{4})\\)$"),"\\d{4}")))
+validation <- validation %>% 
+  mutate(year = as.integer(str_extract(str_extract(title,"\\((\\d{4})\\)$"),"\\d{4}")))
+```
+
+&nbsp;  
+We can see the number of unique users and how many unique movies were rated:
+
+```{r}
+edx %>% summarize(n_movies = n_distinct(movieId), 
+                  n_users = n_distinct(userId), 
+                  n_years = n_distinct(year))
+```
+
+&nbsp;  
+We have 10,677 movies, 69,878 users and 94 years of movies.If we multiply the number of movies and users we get a number larger than the observations in edx dataset. This implies that not every user rated every movie.
+
+Let’s look at some of the general properties of the edx dataset, we start with an histogram of movies:
+
+```{r, fig.width=6.5, fig.height=3.5, fig.align = 'center'}
+edx %>% count(movieId) %>% ggplot(aes(n)) + 
+  geom_histogram(bins = 30, color="black") + scale_x_log10() + ggtitle("Fig. 1 - Movies")
+```
+
+&nbsp;  
+The figure 1 shows that some movies get rated more than others. This is because some movies are more popular and are watched by millions, while some artsy, independent movies are watched by just a few.
+
+Now let's take a look at a histogram of users, with the following plot:
+
+```{r, fig.width=6.5, fig.height=3.5, fig.align = 'center'}
+edx %>% count(userId) %>% ggplot(aes(n)) + 
+  geom_histogram(bins = 30, color="black") + scale_x_log10() + ggtitle("Fig. 2 - Users")
+```
+
+&nbsp;  
+In figure 2 we see that some users are more active than others at rating movies. We must remember that not all movies are reviewed by all users, as seen in this histogram.
+
+We already know the mean and median of ratings, let's see how the ratings are distributed:
+
+```{r}
+edx %>% group_by(rating) %>% tally()
+```
+
+&nbsp;  
+Half star ratings are less common than whole star ratings, as we see for example 2,121,240 three star rating versus 330,010 two and half rating, or 791,624 three and half rating.
+
+Let's see now the count of ratings per movie year, in the following line plot:
+
+```{r, fig.width=6.5, fig.height=3.5, fig.align = 'center'}
+edx %>% group_by(year) %>% summarize(count=n()/1000) %>% ggplot(aes(year,count)) + 
+  geom_line() + ggtitle("Fig. 3 - Movie year ratings") + ylab("Count in thousands")
+```
+
+&nbsp;  
+The figure 3 shows that movies that were released from 1980 and after have more ratings than the movies released before. We can imply that the exposure of the users is higher for recent movies. 
+
+Now we want to know what is the average rating per movie year, using a dot plot:
+
+```{r, fig.width=6.5, fig.height=3.5, fig.align = 'center'}
+edx %>% group_by(year) %>% 
+  summarize(average = mean(rating)) %>% ggplot(aes(year,average)) + 
+  geom_point() + ggtitle("Fig. 4 - Movie year average rating") 
+```
+
+&nbsp;  
+Interestingly, in figure 4 we see the older the movie the better average rating it has.
+
+The edx dataset has ratings from 1995 onward, let's see if there is a variation in the average rating using a dot plot:
+
+```{r, fig.width=6.5, fig.height=3.5, fig.align = 'center'}
+edx %>% group_by(date) %>% 
+  summarize(rating = mean(rating)) %>% ggplot(aes(date,rating)) + geom_point() + 
+  ggtitle("Fig. 5 - Rating date average")
+```
+
+&nbsp;  
+In figure 5 we don't see any noticeable changing trend in average rating per date, as opposed to what we have seen in figure 4.
+
+Now we can compute the number of ratings for each movie and plot it against the year it came out in the following graphic:
+
+```{r, fig.width=6.5, fig.height=3.5, fig.align = 'center'}
+edx %>% group_by(movieId) %>% summarize(n=n(),year=as.character(first(year))) %>% 
+  qplot(year,n,data=.,geom="boxplot", main = "Fig. 6 - Rating quantity per year Boxplot ") + 
+  coord_trans(y="sqrt") + theme(axis.text.x=element_text(angle=90,hjust=1))
+```
+
+&nbsp;  
+In figure 6 we see that the year 1996 has the highest median number of ratings. We also see that movies from 
+
+$\sum_{k=1}^K x_{u,i} \beta_k + \varepsilon_{u,i}$, with $x^k_{u,i} = 1$ if $g_{u,i}$ is genre $k$.
+
+## 4. Modelling the data
+
+The goal of developing models in machine learning is to extract insights from data that you can then use to make better decisions and in our case, to make better recommendations. Algorithmic models tell you which outcome is likely to hold true for your target variable based on your training data. They construct a representation of the relationships and tease out patterns between all the different features in our dataset that you can apply to similar data you collect in the future, allowing you to make decisions based on those patterns and relationships. 
+
+Since we have a training data set named edx, we further divide it into a train set of 80% observations and a test set of 20%. This is to avoid using our validation dataset because like a real model we use the validation as we don't know its outcomes. The train and test set will be used for tuning our model.
+
+```{r, warning=FALSE}
+#   Firstly we create a training and test set from edx dataset, in order to tune our model
+set.seed(1996)
+test_index <- createDataPartition(y = edx$rating, times = 1, p = 0.2,list = FALSE)
+train_set <- edx[-test_index,]
+test_set_tmp <- edx[test_index,]
+test_set <- test_set_tmp %>% 
+  semi_join(train_set, by = "movieId") %>% semi_join(train_set, by = "userId")
+train_set <- rbind(train_set, anti_join(test_set_tmp, test_set))
+rm(test_set_tmp)
+```
+
+
+
+
+## 5. Conclusions
+
