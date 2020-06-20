@@ -1,6 +1,6 @@
 #############################################################
 # Movielens Project Report
-# Date: September 21,2019
+# Date: June 20,2020
 # Repo: https://github.com/alexismenanieves/Movielens_Project
 #############################################################
 
@@ -123,7 +123,7 @@ mu <- mean(edx$rating)
 mu
 lambdas <- seq(0,10,0.25)
 
-# And a basic RMSE function to evaluate
+#   And a basic RMSE function to evaluate
 RMSE <- function(true_ratings, predicted_ratings){ 
   sqrt(mean((true_ratings - predicted_ratings)^2))
 }
