@@ -1,10 +1,10 @@
 # Header ------------------------------------------------------------------
-# Movielens Project Report
+# Title: Movielens Project Report
 # Author: Manuel Alexis Mena Nieves
 # Date: June 20,2020
 # Repo: https://github.com/alexismenanieves/Movielens_Project
 
-# Step 1 - Get the data, understand it and tidy it if necessary -----------
+# Step 1 - Get the data, understand and tidy it if necessary --------------
 
 # Note: this process could take a couple of minutes
 
@@ -23,7 +23,8 @@ if (!file.exists("ml-10M100K/ratings.dat") || !file.exists("ml-10M100K/movies.da
   
   dl <- tempfile()
   download.file("http://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
-  ratings <- fread(text = gsub("::", "\t", readLines(unzip(dl, "ml-10M100K/ratings.dat"))),
+  ratings <- fread(text = gsub("::", "\t", 
+                               readLines(unzip(dl, "ml-10M100K/ratings.dat"))),
                    col.names = c("userId", "movieId", "rating", "timestamp"))
   
   movies <- str_split_fixed(readLines(unzip(dl, "ml-10M100K/movies.dat")), "\\::", 3)
@@ -104,7 +105,9 @@ edx %>% group_by(date) %>%
   ggtitle("Fig. 5 - Rating date average")
 
 edx %>% group_by(movieId) %>% summarize(n=n(),year=as.character(first(year))) %>% 
-  qplot(year,n,data=.,geom="boxplot", main = "Fig. 6 - Ratings per year Boxplot ") + coord_trans(y="sqrt") + 
+  qplot(year,n,data=.,geom="boxplot", 
+        main = "Fig. 6 - Ratings per year Boxplot ") + 
+  coord_trans(y="sqrt") + 
   theme(axis.text.x=element_text(angle=90,hjust=1))
 
 # Step 3 - Modelling and results ------------------------------------------
