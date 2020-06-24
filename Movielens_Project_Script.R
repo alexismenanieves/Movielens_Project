@@ -1,16 +1,17 @@
-#############################################################
+# Header ------------------------------------------------------------------
 # Movielens Project Report
+# Author: Manuel Alexis Mena Nieves
 # Date: June 20,2020
 # Repo: https://github.com/alexismenanieves/Movielens_Project
-#############################################################
 
-# Step 1 - Get the data, understand it and tidy it if necessary ----------------------
+# Step 1 - Get the data, understand it and tidy it if necessary -----------
 
 # Note: this process could take a couple of minutes
 
-if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
-if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
-if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+repo <- "http://cran.us.r-project.org"
+if(!require(tidyverse)) install.packages("tidyverse", repos = repo)
+if(!require(caret)) install.packages("caret", repos = repo)
+if(!require(data.table)) install.packages("data.table", repos = repo)
 
 # MovieLens 10M dataset:
 # https://grouplens.org/datasets/movielens/10m/
@@ -79,7 +80,7 @@ edx <- edx %>%
 validation <- validation %>% 
   mutate(year = as.integer(str_extract(str_extract(title,"\\((\\d{4})\\)$"),"\\d{4}")))
 
-# Step 2 - Exploratory analysis ---------------------------------------------------------
+# Step 2 - Exploratory analysis -------------------------------------------
 
 edx %>% summarize(n_movies = n_distinct(movieId), n_users = n_distinct(userId), n_years = n_distinct(year))
 
@@ -106,7 +107,8 @@ edx %>% group_by(movieId) %>% summarize(n=n(),year=as.character(first(year))) %>
   qplot(year,n,data=.,geom="boxplot", main = "Fig. 6 - Ratings per year Boxplot ") + coord_trans(y="sqrt") + 
   theme(axis.text.x=element_text(angle=90,hjust=1))
 
-# Step 3 - Modelling and results --------------------------------------------------------
+# Step 3 - Modelling and results ------------------------------------------
+doParallel::registerDoParallel()
 
 #   Firstly we create a training and test set from edx dataset, in order to tune our model
 set.seed(1996)
@@ -225,6 +227,9 @@ b_y_tuned <- edx %>%
   left_join(b_u_tuned, by = "userId") %>% 
   group_by(year) %>% 
   summarize(b_y_tuned = sum(rating - b_i_tuned - b_u_tuned - mu)/(n() + best_lambda))
+
+# Step 4 - Evaluate the tuned model against validation dataset  -----------
+
 predicted_ratings <- validation %>% 
   left_join(b_i_tuned, by = "movieId") %>% 
   left_join(b_u_tuned, by = "userId") %>% 
@@ -233,4 +238,3 @@ predicted_ratings <- validation %>%
   pull(pred)
 final_rmse <- RMSE(predicted_ratings, validation$rating)
 final_rmse
-

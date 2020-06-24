@@ -1,7 +1,7 @@
 ---
 title: "Movielens Project Report"
 author: "Manuel Alexis Mena Nieves"
-date: "October 17, 2019"
+date: "June 23, 2020"
 output: pdf_document
 ---
 
@@ -11,7 +11,7 @@ This project report is about creating a movie recommendation system for the Harv
 
 This dataset describes 5-star rating and free-text tagging activity from MovieLens, a movie recommendation service, with a ‘movieId’ for each movie, and an anonymized ‘userId’ for each user who provided one or more movie reviews.
 
-The goal of the project is to create an algorithm to predict how users will rate movies using all the tools shown throughout the courses in this series. To accomplish this an exploratory analysis was done, in order to understand the data and summarize their main characteristics with tables and visual methods. After this, a machine learning model was created to predict how each user would rate movies.
+The goal of the project is to create an algorithm to predict how users will rate movies using all the tools shown throughout the courses in this series. To accomplish this goal an exploratory analysis was done, in order to understand the data and summarize their main characteristics with tables and visual methods. After this, a machine learning model was created to predict how each user would rate movies.
 
 ## 2. Getting the data
 
@@ -200,9 +200,7 @@ edx %>% group_by(movieId) %>% summarize(n=n(),year=as.character(first(year))) %>
 ```
 
 &nbsp;  
-In figure 6 we see that the year 1996 has the highest median number of ratings. We also see that movies from 
-
-$\sum_{k=1}^K x_{u,i} \beta_k + \varepsilon_{u,i}$, with $x^k_{u,i} = 1$ if $g_{u,i}$ is genre $k$.
+In figure 6 we see that the year 1996 has the highest median number of ratings.
 
 ## 4. Modelling the data
 
@@ -222,8 +220,157 @@ train_set <- rbind(train_set, anti_join(test_set_tmp, test_set))
 rm(test_set_tmp)
 ```
 
+Then we create a basic model, which is simply the mean of the rating.
 
+```{r}
+#   Sencondly, we apply a basic model on training dataset:
+mu <- mean(edx$rating)
+mu
+lambdas <- seq(0,10,0.25)
+```
 
+Then we create a function for the RMSE, using the difference of the tue ratings versus our first prediction.
+
+```{r}
+#   And a basic RMSE function to evaluate
+RMSE <- function(true_ratings, predicted_ratings){ 
+  sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+```
+
+Since we have this naive approach, we can use this for to see how well we did by seeing the RMSE results.
+
+```{r}
+#   3.1 Naive approach
+mu <- mean(edx$rating)
+naive_rmse <- RMSE(test_set$rating,mu)
+rmse_results <- data_frame(Method = "Just the average", RMSE = naive_rmse)
+```
+
+Now we evaluate what is the effect of the movie ratings.
+
+```{r}
+#   3.2 Movie effect
+movie_avgs <- train_set %>% 
+  group_by(movieId) %>% 
+  summarize(b_i = mean(rating - mu))
+predicted_ratings <- mu + test_set %>% 
+  left_join(movie_avgs, by = "movieId") %>% 
+  pull(b_i)
+movie_effect_rmse <- RMSE(predicted_ratings, test_set$rating)
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Method = "Movie effect", 
+                                     RMSE = movie_effect_rmse))
+```
+
+Then we calculate the effect of the users on the rating.
+
+```{r}
+#   3.3 User effect
+user_avgs <- train_set %>% 
+  left_join(movie_avgs, by = "movieId") %>% 
+  group_by(userId) %>% 
+  summarize(b_u = mean(rating - mu - b_i))
+predicted_ratings <- test_set %>% 
+  left_join(movie_avgs, by = "movieId") %>% 
+  left_join(user_avgs, by = "userId") %>% mutate(pred = mu + b_i + b_u) %>% 
+  pull(pred)
+user_effect_rmse <- RMSE(predicted_ratings, test_set$rating)
+rmse_results <- bind_rows(rmse_results, 
+                          data_frame(Method = "User effect", 
+                                     RMSE = user_effect_rmse))
+```
+
+As we saw before, the year of release of the movie is important in our model, so lets use the year effect in our model:
+
+```{r}
+#   3.4 Year effect
+year_avgs <- train_set %>% 
+  left_join(movie_avgs, by = "movieId") %>% 
+  left_join(user_avgs, by = "userId") %>% 
+  group_by(year) %>% 
+  summarize(b_y = mean(rating - mu - b_i - b_u))
+
+predicted_ratings <- test_set %>% 
+  left_join(movie_avgs, by = "movieId") %>% 
+  left_join(user_avgs, by = "userId") %>% 
+  left_join(year_avgs, by = "year") %>% 
+  mutate(pred = mu + b_i + b_u + b_y) %>% 
+  pull(pred)
+RMSE(predicted_ratings, test_set$rating)
+```
+
+Now we have to regularize our model using a lambda sequence.
+
+```{r}
+#   3.4 Regularized movie + user effect
+lambdas <- seq(0,10,0.25)
+
+rmses <- sapply(lambdas, function(l){
+  b_i <- train_set %>% 
+    group_by(movieId) %>% 
+    summarize(b_i = sum(rating -  mu)/(n()+l))
+  
+  b_u <- train_set %>% 
+    left_join(b_i, by = "movieId") %>% 
+    group_by(userId) %>% 
+    summarize(b_u = sum(rating - b_i - mu)/(n()+l))
+  
+  # Year effect
+  b_y <- train_set %>% 
+    left_join(b_i, by = "movieId") %>% 
+    left_join(b_u, by = "userId") %>% 
+    group_by(year) %>% 
+    summarize(b_y = sum(rating - b_u - b_i - mu)/(n()+l))
+  
+  predicted_ratings <- test_set %>% 
+    left_join(b_i, by = "movieId") %>% 
+    left_join(b_u, by = "userId") %>% 
+    left_join(b_y, by = "year") %>%
+    mutate(pred = mu + b_i + b_u + b_y) %>% 
+    pull(pred)
+  return(RMSE(predicted_ratings, test_set$rating))
+})
+```
+
+Now we can see what is the best 
+
+```{r}
+# Lets make a lambdas vs rmses plot to see where is the best lambda
+qplot(lambdas,rmses)
+best_lambda <- lambdas[which.min(rmses)]
+best_lambda
+min(rmses)
+rmse_results <- bind_rows(rmse_results, 
+                          data_frame(Method = "Regularized movie + user + year effect", 
+                                     RMSE = min(rmses)))
+```
+
+```{r}
+# Test the result against validation set
+
+b_i_tuned <- edx %>% 
+  group_by(movieId) %>% 
+  summarize(b_i_tuned = sum(rating - mu)/(n() + best_lambda))
+b_u_tuned <- edx %>% 
+  left_join(b_i_tuned, by = "movieId") %>% 
+  group_by(userId) %>% 
+  summarize(b_u_tuned = sum(rating - b_i_tuned - mu)/(n() + best_lambda))
+b_y_tuned <- edx %>% 
+  left_join(b_i_tuned, by = "movieId") %>% 
+  left_join(b_u_tuned, by = "userId") %>% 
+  group_by(year) %>% 
+  summarize(b_y_tuned = sum(rating - b_i_tuned - b_u_tuned - mu)/(n() + best_lambda))
+predicted_ratings <- validation %>% 
+  left_join(b_i_tuned, by = "movieId") %>% 
+  left_join(b_u_tuned, by = "userId") %>% 
+  left_join(b_y_tuned, by = "year") %>% 
+  mutate(pred = mu + b_i_tuned + b_u_tuned + b_y_tuned) %>% 
+  pull(pred)
+final_rmse <- RMSE(predicted_ratings, validation$rating)
+final_rmse
+```
 
 ## 5. Conclusions
-
+- By applying a prediction based on ratings by user, movie and year we could get an accuracy of 
+- It's tempting to think that this model can be used for users who has not rated yet a movie, but it can be useful as a common recommendation from other users.
